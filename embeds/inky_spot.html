@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Organic Noise Playground</title>
+  <style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <script>
+    const canvas = document.getElementById("glcanvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+    if (!gl) alert("WebGL not supported");
+
+    const vertSrc = `
+      attribute vec2 position;
+      void main() { gl_Position = vec4(position, 0.0, 1.0); }
+    `;
+
+    const fragSrc = `
+      #ifdef GL_ES
+      precision mediump float;
+      #endif
+      uniform vec2 u_resolution;
+      uniform vec2 u_mouse;
+      uniform float u_time;
+
+      vec2 random2(vec2 st){
+          st = vec2( dot(st,vec2(127.1,311.7)), dot(st,vec2(269.5,183.3)) );
+          return -1.0 + 2.0*fract(sin(st)*43758.5453123);
+      }
+      float noise(vec2 st) {
+          vec2 i = floor(st);
+          vec2 f = fract(st);
+          vec2 u = f*f*(3.0-2.0*f);
+          return mix( mix( dot( random2(i + vec2(0.0,0.0) ), f - vec2(0.0,0.0) ),
+                          dot( random2(i + vec2(1.0,0.0) ), f - vec2(1.0,0.0) ), u.x),
+                      mix( dot( random2(i + vec2(0.0,1.0) ), f - vec2(0.0,1.0) ),
+                          dot( random2(i + vec2(1.0,1.0) ), f - vec2(1.0,1.0) ), u.x), u.y);
+      }
+      void main() {
+          vec2 st = gl_FragCoord.xy / u_resolution.xy;
+          st.x *= u_resolution.x / u_resolution.y;
+          vec3 color = vec3(0.0);
+          float t = 1.0;
+          // Mouse interaction
+          st += noise(st * 2.0 + u_mouse * 0.35) * t;
+          
+          color = vec3(1.0) * smoothstep(.18,.2, noise(st)); 
+          color += smoothstep(.15,.2, noise(st * 10.0));     
+          color -= smoothstep(.35,.4, noise(st * 10.0));     
+          gl_FragColor = vec4(1.0 - color, 1.0);
+      }
+    `;
+
+    // Shader Compile Helper
+    function createProgram(vs, fs) {
+      const p = gl.createProgram();
+      const addShader = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        gl.attachShader(p, s);
+      };
+      addShader(gl.VERTEX_SHADER, vs);
+      addShader(gl.FRAGMENT_SHADER, fs);
+      gl.linkProgram(p);
+      gl.useProgram(p);
+      return p;
+    }
+
+    const program = createProgram(vertSrc, fragSrc);
+
+    // Buffer Setup
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    // Uniforms
+    const uTime = gl.getUniformLocation(program, "u_time");
+    const uRes = gl.getUniformLocation(program, "u_resolution");
+    const uMouse = gl.getUniformLocation(program, "u_mouse");
+
+    // State
+    let mouse = { x: 0, y: 0 };
+    const startTime = performance.now();
+
+    window.addEventListener("pointermove", e => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    });
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    function loop() {
+      gl.uniform1f(uTime, (performance.now() - startTime) / 1000);
+      gl.uniform2f(uMouse, mouse.x, mouse.y);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

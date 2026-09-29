@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { width: 100%; height: 100%; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+    <script type="x-shader/x-vertex" id="vs">
+        attribute vec2 position;
+        void main() { gl_Position = vec4(position, 0.0, 1.0); }
+    </script>
+    <script type="x-shader/x-fragment" id="fs">
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform vec2 u_mouse;
+        uniform float u_time;
+
+        // --- NOISE FUNCTIONS ---
+        float random (in vec2 _st) {
+            return fract(sin(dot(_st.xy, vec2(12.9898,78.233)))*43758.5453123);
+        }
+
+        // Based on Morgan McGuire @morgan3d
+        // https://www.shadertoy.com/view/4dS3Wd
+        float noise (in vec2 _st) {
+            vec2 i = floor(_st);
+            vec2 f = fract(_st);
+
+            // Four corners in 2D of a tile
+            float a = random(i);
+            float b = random(i + vec2(1.0, 0.0));
+            float c = random(i + vec2(0.0, 1.0));
+            float d = random(i + vec2(1.0, 1.0));
+
+            vec2 u = f * f * (3.0 - 2.0 * f);
+
+            return mix(a, b, u.x) +
+                    (c - a)* u.y * (1.0 - u.x) +
+                    (d - b) * u.x * u.y;
+        }
+
+        #define NUM_OCTAVES 6
+
+        float fbm ( in vec2 _st) {
+            float v = 0.0;
+            float a = 0.5;
+            vec2 shift = vec2(100.0);
+            // Rotate to reduce axial bias
+            mat2 rot = mat2(cos(0.5), sin(0.5),
+                            -sin(0.5), cos(0.50));
+            for (int i = 0; i < NUM_OCTAVES; ++i) {
+                v += a * noise(_st);
+                _st = rot * _st * 2.0 + shift;
+                a *= 0.5;
+            }
+            return v;
+        }
+
+        // --- PALETTE FUNCTION (IQ Style) ---
+        // Generates smooth color gradients
+        vec3 palette( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d ) {
+            return a + b*cos( 6.28318*(c*t+d) );
+        }
+
+        void main() {
+            vec2 st = gl_FragCoord.xy/u_resolution.xy;
+            st.x *= u_resolution.x/u_resolution.y;
+
+            // --- INTERACTIVITY MAPPING ---
+            // Map Mouse X to Zoom/Scale (0.0 to 1.0 -> 1.0 to 8.0)
+            float zoom = 1.0 + (u_mouse.x * 7.0); 
+            
+            // Map Mouse Y to Warp Intensity (0.0 to 1.0 -> 0.0 to 2.5)
+            float warpStrength = u_mouse.y * 2.5;
+
+            // Coordinate manipulation
+            vec2 q = vec2(0.);
+            q.x = fbm( st * zoom + 0.1 * u_time);
+            q.y = fbm( st * zoom + vec2(1.0));
+
+            vec2 r = vec2(0.);
+            // Domain warping: feed the noise result back into the noise function
+            r.x = fbm( st * zoom + warpStrength * q + vec2(1.7,9.2) + 0.15 * u_time );
+            r.y = fbm( st * zoom + warpStrength * q + vec2(8.3,2.8) + 0.126 * u_time);
+
+            float f = fbm(st * zoom + warpStrength * r);
+
+            // --- COLORING ---
+            // Define palette parameters (Cyberpunk / Neon aesthetic)
+            vec3 c_a = vec3(0.5, 0.5, 0.5);
+            vec3 c_b = vec3(0.5, 0.5, 0.5);
+            vec3 c_c = vec3(1.0, 1.0, 1.0);
+            vec3 c_d = vec3(0.263, 0.416, 0.557); // Blue/Purple phase
+
+            // Mix the final noise value 'f' with the intermediate warp value 'length(q)'
+            // This creates the iridescent oil look
+            vec3 color = palette(f + length(q) + u_time * 0.2, c_a, c_b, c_c, c_d);
+
+            // Darken edges slightly for depth (vignette-ish effect based on warp)
+            color = mix(color, vec3(0.0, 0.0, 0.1), clamp(length(r)*0.5, 0.0, 1.0));
+            
+            // Highlights
+            color += vec3(0.1, 0.5, 0.7) * pow(f, 3.0);
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl');
+        const program = gl.createProgram();
+        
+        const createShader = (type, source) => {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, source);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(s));
+            }
+            return s;
+        };
+
+        gl.attachShader(program, createShader(gl.VERTEX_SHADER, document.getElementById('vs').innerText));
+        gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, document.getElementById('fs').innerText));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+
+        const pos = gl.getAttribLocation(program, "position");
+        gl.enableVertexAttribArray(pos);
+        gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+        const uRes = gl.getUniformLocation(program, "u_resolution");
+        const uMouse = gl.getUniformLocation(program, "u_mouse");
+        const uTime = gl.getUniformLocation(program, "u_time");
+
+        // Default mouse position (center)
+        let mx = 0.5, my = 0.5;
+        
+        // Track mouse movement
+        window.addEventListener('mousemove', e => {
+            mx = e.clientX / window.innerWidth;
+            my = 1.0 - (e.clientY / window.innerHeight); // Flip Y to match WebGL coords
+        });
+
+        // Handle Touch for mobile
+        window.addEventListener('touchmove', e => {
+            mx = e.touches[0].clientX / window.innerWidth;
+            my = 1.0 - (e.touches[0].clientY / window.innerHeight);
+        }, {passive: true});
+
+        function render(time) {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            
+            gl.uniform2f(uRes, canvas.width, canvas.height);
+            gl.uniform2f(uMouse, mx, my);
+            gl.uniform1f(uTime, time * 0.001); // Time in seconds
+            
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

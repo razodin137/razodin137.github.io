@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crystal Fractal Kaleidoscope</title>
+  <style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <script>
+    const canvas = document.getElementById("glcanvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+    if (!gl) alert("WebGL not supported");
+
+    const vertSrc = `
+      attribute vec2 position;
+      void main() { gl_Position = vec4(position, 0.0, 1.0); }
+    `;
+
+    const fragSrc = `
+      #ifdef GL_ES
+      precision highp float;
+      #endif
+      
+      uniform vec2 u_resolution;
+      uniform vec2 u_mouse;
+      uniform float u_time;
+
+      // Palette function by Inigo Quilez
+      vec3 palette( in float t ) {
+          vec3 a = vec3(0.5, 0.5, 0.5);
+          vec3 b = vec3(0.5, 0.5, 0.5);
+          vec3 c = vec3(1.0, 1.0, 1.0);
+          vec3 d = vec3(0.263,0.416,0.557);
+          return a + b*cos( 6.28318*(c*t+d) );
+      }
+
+      void main() {
+          // Normalized coordinates centered at 0,0, corrected for aspect ratio
+          vec2 uv = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / u_resolution.y;
+          vec2 uv0 = uv; // Store original UV
+          
+          vec3 finalColor = vec3(0.0);
+          
+          // Interaction: Map mouse (-1 to 1) to useful parameters
+          // Mouse X affects scale/spacing, Mouse Y affects rotation speed
+          float mX = u_mouse.x; 
+          float mY = u_mouse.y; 
+
+          for (float i = 0.0; i < 4.0; i++) {
+              // Space folding logic (Fractal)
+              uv = fract(uv * 1.5) - 0.5;
+
+              float d = length(uv) * exp(-length(uv0));
+
+              // Color palette changing over time and distance
+              vec3 col = palette(length(uv0) + i*.4 + u_time*.4);
+
+              // Rings definition
+              d = sin(d*8. + u_time + mY*4.0)/8.;
+              d = abs(d);
+
+              // Glow calculation (Inverse distance)
+              // Mouse X controls the "tightness" of the glow
+              d = pow(0.01 / d, 1.2 + mX * 0.5);
+
+              finalColor += col * d;
+          }
+          
+          // Vignette
+          finalColor *= 1.0 - length(uv0) * 0.3;
+
+          gl_FragColor = vec4(finalColor, 1.0);
+      }
+    `;
+
+    function createProgram(vs, fs) {
+      const p = gl.createProgram();
+      const addShader = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+           console.error(gl.getShaderInfoLog(s));
+        }
+        gl.attachShader(p, s);
+      };
+      addShader(gl.VERTEX_SHADER, vs);
+      addShader(gl.FRAGMENT_SHADER, fs);
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+         console.error(gl.getProgramInfoLog(p));
+      }
+      gl.useProgram(p);
+      return p;
+    }
+
+    const program = createProgram(vertSrc, fragSrc);
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const uTime = gl.getUniformLocation(program, "u_time");
+    const uRes = gl.getUniformLocation(program, "u_resolution");
+    const uMouse = gl.getUniformLocation(program, "u_mouse");
+
+    let mouse = { x: 0.0, y: 0.0 };
+    const startTime = performance.now();
+
+    window.addEventListener("pointermove", e => {
+      const rect = canvas.getBoundingClientRect();
+      // Normalize to -1.0 to 1.0
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    });
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    function loop() {
+      gl.uniform1f(uTime, (performance.now() - startTime) / 1000);
+      // Add some subtle auto-movement to mouse if user is idle to show effect
+      let mx = mouse.x;
+      let my = mouse.y;
+      
+      gl.uniform2f(uMouse, mx, my);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

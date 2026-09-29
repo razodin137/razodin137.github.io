@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liquid Text Shader</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #ffffff; /* Explicit white background */
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* 
+           LAYER 1: The Shader
+           Fixed to the viewport, sitting behind everything.
+        */
+        canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            z-index: 0;
+        }
+
+        /* 
+           LAYER 2: The Mask
+           This covers the shader. 
+           mix-blend-mode: lighten causes:
+           - White pixels to stay White (hiding the shader).
+           - Black pixels to show the layer below (revealing the shader).
+        */
+        #mask-layer {
+            position: relative;
+            z-index: 10;
+            width: 100vw;
+            height: 100vh;
+            background: #ffffff; 
+            color: #000000;
+            mix-blend-mode: lighten; /* THE MAGIC PROPERTY */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        /* Typography setup for maximum shader visibility */
+        h1 {
+            font-family: 'Archivo Black', sans-serif;
+            font-size: 15vw; /* Massive text */
+            line-height: 0.85;
+            margin: 0;
+            letter-spacing: -0.04em;
+            text-transform: uppercase;
+            color: #000; /* Black = Transparent window to shader */
+        }
+
+        p {
+            margin-top: 2rem;
+            font-size: 1.2rem;
+            color: #000;
+            font-weight: 500;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 40px;
+            font-size: 0.8rem;
+            color: #aaa; /* Gray text sits on top of white */
+            pointer-events: none;
+            mix-blend-mode: normal; /* Don't blend the helper text */
+        }
+        
+        /* Small layout tweaks */
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- THE WEBGL CANVAS -->
+    <canvas id="glcanvas"></canvas>
+
+    <!-- THE MASK OVERLAY -->
+    <div id="mask-layer">
+        <div class="container">
+            <h1>Liquid<br>Type</h1>
+            <p>Move mouse to ripple</p>
+        </div>
+        <div class="controls">
+             X: Color Spectrum &nbsp;&nbsp;|&nbsp;&nbsp; Y: Turbulence Speed
+        </div>
+    </div>
+
+    <!-- VERTEX SHADER -->
+    <script type="x-shader/x-vertex" id="vs">
+        attribute vec2 position;
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+        }
+    </script>
+
+    <!-- FRAGMENT SHADER -->
+    <script type="x-shader/x-fragment" id="fs">
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform vec2 u_mouse;
+
+        // GLSL Noise functions
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+        
+        float snoise(vec2 v) {
+            const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                                -0.577350269189626, 0.024390243902439);
+            vec2 i  = floor(v + dot(v, C.yy) );
+            vec2 x0 = v -   i + dot(i, C.xx);
+            vec2 i1;
+            i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+            vec4 x12 = x0.xyxy + C.xxzz;
+            x12.xy -= i1;
+            i = mod289(i);
+            vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+                + i.x + vec3(0.0, i1.x, 1.0 ));
+            vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+            m = m*m ;
+            m = m*m ;
+            vec3 x = 2.0 * fract(p * C.www) - 1.0;
+            vec3 h = abs(x) - 0.5;
+            vec3 ox = floor(x + 0.5);
+            vec3 a0 = x - ox;
+            m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+            vec3 g;
+            g.x  = a0.x  * x0.x  + h.x  * x0.y;
+            g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+            return 130.0 * dot(m, g);
+        }
+
+        // Domain warping pattern
+        float pattern(in vec2 p, in float t, in vec2 m, out vec2 q, out vec2 r) {
+            // q is the first layer of distortion
+            q.x = snoise(p + vec2(0.0, 0.0));
+            q.y = snoise(p + vec2(5.2, 1.3));
+
+            // Interaction: Mouse Y affects speed of internal flow
+            float speed = 0.5 + m.y * 2.0;
+
+            // r is the second layer, heavily distorted by q
+            r.x = snoise(p + 4.0*q + vec2(1.7, 9.2) + 0.15*t*speed);
+            r.y = snoise(p + 4.0*q + vec2(8.3, 2.8) + 0.126*t*speed);
+
+            // Final noise
+            return snoise(p + 4.0*r);
+        }
+
+        void main() {
+            vec2 st = gl_FragCoord.xy / u_resolution.xy;
+            st.x *= u_resolution.x / u_resolution.y;
+
+            // Scale up coord system
+            st *= 2.5;
+
+            float mx = u_mouse.x; // 0.0 - 1.0
+            float my = u_mouse.y; // 0.0 - 1.0
+
+            vec2 q, r;
+            // Generate the warped pattern
+            float f = pattern(st, u_time, u_mouse, q, r);
+
+            // Color Palette Mixing
+            // We use the mouse X to shift the primary hue
+            vec3 colorA = vec3(0.5, 0.1, 0.1); // Dark Red
+            vec3 colorB = vec3(0.1, 0.4, 0.6); // Blue
+            vec3 colorC = vec3(0.8, 0.8, 0.2); // Yellow
+
+            // Interactive Hue Shift based on Mouse X
+            vec3 shift = vec3(mx * 3.0, mx * 1.5, mx * 0.5);
+            
+            // Mix based on the various noise components (f, q, r)
+            vec3 col = mix(colorA + shift * 0.1, colorB, clamp(length(q), 0.0, 1.0));
+            col = mix(col, colorC, clamp(length(r.x), 0.0, 1.0));
+            
+            // Add the sharp ridges of the "fluid"
+            float ridge = smoothstep(0.3, 0.7, f);
+            col = mix(col, vec3(1.0) - shift * 0.2, ridge);
+
+            // Output
+            gl_FragColor = vec4(col, 1.0);
+        }
+    </script>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl');
+        const program = gl.createProgram();
+
+        const createShader = (type, source) => {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, source);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(s));
+            }
+            return s;
+        };
+
+        const vsSource = document.getElementById('vs').innerText;
+        const fsSource = document.getElementById('fs').innerText;
+
+        gl.attachShader(program, createShader(gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+
+        const pos = gl.getAttribLocation(program, "position");
+        gl.enableVertexAttribArray(pos);
+        gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+        const uRes = gl.getUniformLocation(program, "u_resolution");
+        const uMouse = gl.getUniformLocation(program, "u_mouse");
+        const uTime = gl.getUniformLocation(program, "u_time");
+
+        let mx = 0.5, my = 0.5;
+        let targetMx = 0.5, targetMy = 0.5;
+
+        window.addEventListener('mousemove', e => {
+            targetMx = e.clientX / window.innerWidth;
+            targetMy = 1.0 - (e.clientY / window.innerHeight);
+        });
+
+        let startTime = performance.now();
+
+        function render() {
+            let time = (performance.now() - startTime) * 0.001;
+
+            // Interpolate mouse for smoothness
+            mx += (targetMx - mx) * 0.04;
+            my += (targetMy - my) * 0.04;
+
+            const displayWidth  = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+
+            gl.uniform2f(uRes, canvas.width, canvas.height);
+            gl.uniform2f(uMouse, mx, my);
+            gl.uniform1f(uTime, time);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

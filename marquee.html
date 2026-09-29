@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INDEX_OF_WORKS</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="shell">
+
+  <header class="shell-header">
+    <h1>INDEX_OF_WORKS</h1>
+    <a class="shell-nav" href="index.html">REPOS INDEX ↗</a>
+  </header>
+
+  <div class="marquee-container">
+    <div class="marquee-track" id="marquee-track">
+      <a class="marquee-link" onclick="loadPage('embeds/liquidrainbow-text-shader.html', 'PROJECT ALPHA')">/// LIQUID TEXT</a>
+      <a class="marquee-link" onclick="loadPage('embeds/rainbowshader.html', 'GALLERY VIEW')">/// rainbow_shader</a>
+      <a class="marquee-link" onclick="loadPage('embeds/nebula-heatmap.html', 'nebula_heatmap')">/// nebula_heatmap</a>
+      <a class="marquee-link" onclick="loadPage('embeds/inky_spot.html', 'inky_spot')">/// inky_spot</a>
+      <a class="marquee-link" onclick="loadPage('embeds/clicky_orbs.html', 'clicky_orbs')">/// clicky_orbs</a>
+      <a class="marquee-link" onclick="loadPage('embeds/that-one-i-made-in-2023-but-its-been-absorbed-into-the-ai-mind.html', 'that-one-i-made-in-2023-but-its-been-absorbed-into-the-ai-mind-defaults')">/// that-one-i-made-in-2023-but-its-been-absorbed-into-the-ai-mind-defaults</a>
+      <a class="marquee-link" onclick="loadPage('embeds/mudslide-mercury.html', 'mudslide mercury')">/// mudslide_mercury</a>
+      <a class="marquee-link" onclick="loadPage('embeds/swirling_temp.html', 'swirling_temp')">/// swirling_temp</a>
+      <a class="marquee-link" onclick="loadPage('embeds/buck-creek-page.html', 'buckcreek')">/// buckcreek</a>
+    </div>
+  </div>
+
+  <main class="viewport">
+    <div class="viewport-label" id="view-label">WAITING_FOR_INPUT...</div>
+    <iframe id="main-frame" src="about:blank" title="work viewer"></iframe>
+  </main>
+
+  <script>
+    // Switch the iframe source and its label
+    function loadPage(url, label) {
+      document.getElementById('main-frame').src = url;
+      document.getElementById('view-label').textContent = "VIEWING: " + label;
+    }
+
+    // Pause marquee on hover
+    const track = document.getElementById('marquee-track');
+    track.addEventListener('mouseenter', () => {
+      track.style.animationPlayState = 'paused';
+    });
+    track.addEventListener('mouseleave', () => {
+      track.style.animationPlayState = 'running';
+    });
+
+    // ---------- AUTO-DISCOVERY ----------
+    // Appends every repo tagged with the `marquee` topic from data.json —
+    // the same feed the dashboard page reads (pre-fetched by the scheduled
+    // Actions workflow, so this never touches the GitHub API or its rate
+    // limit). Tag a repo `marquee` on GitHub and it shows up here after the
+    // feed refreshes. Tries the same-origin file first, then falls back to
+    // the deployed feed URL (for file:// previews, dev servers rooted
+    // elsewhere, or the old marquee repo consuming it cross-origin). If both
+    // fail the hardcoded embeds above keep working alone.
+    const FEED_FALLBACK = 'https://razodin137.github.io/2026-09-25-github-pages-homepage/data.json';
+    const BASE_SPEED_PX = 75; // pixels per second — scroll speed stays constant as links are added
+
+    function addRepoLink(repo) {
+      const site = (repo.homepage && repo.homepage.trim()) ||
+                   `https://${repo.owner}.github.io/${repo.name}/`;
+      const a = document.createElement('a');
+      a.className = 'marquee-link';
+      a.textContent = `/// ${repo.name}`;
+      a.onclick = () => loadPage(site, repo.name);
+      track.appendChild(a);
+    }
+
+    function rescaleAnimation() {
+      const width = track.scrollWidth;
+      if (width > 0) track.style.animationDuration = `${width / BASE_SPEED_PX}s`;
+    }
+
+    function showTagged(data) {
+      const tagged = (data.repos || []).filter(r =>
+        (r.topics || []).includes('marquee') && (r.has_pages || r.homepage)
+      );
+      tagged.forEach(addRepoLink);
+      rescaleAnimation();
+    }
+
+    fetch('data.json')
+      .then(res => { if (!res.ok) throw new Error(res.status); return res.json(); })
+      .then(showTagged)
+      .catch(() =>
+        fetch(FEED_FALLBACK)
+          .then(res => { if (!res.ok) throw new Error(res.status); return res.json(); })
+          .then(showTagged)
+          .catch(() => {}) // feed unavailable — the local embeds stand alone
+      );
+  </script>
+</body>
+</html>

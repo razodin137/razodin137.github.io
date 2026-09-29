@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clarity | Harmonic Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            color: #e5e5e5;
+            font-family: 'Inter', sans-serif;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20; /* Above text overlay */
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: color 0.3s;
+        }
+
+        /* Text Overlay Specifics */
+        #text-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background-color: white;
+            color: black;
+            mix-blend-mode: screen;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-weight: 900;
+            outline: none;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+            cursor: text;
+        }
+        
+        #text-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Responsive Text Size */
+        .fluid-text {
+            font-size: clamp(4rem, 15vw, 20rem);
+            line-height: 0.85;
+            letter-spacing: -0.05em;
+            width: 100%;
+            padding: 20px;
+        }
+
+        /* UI Control Panel */
+        .control-panel {
+            pointer-events: auto;
+            backdrop-filter: blur(12px);
+            background-color: rgba(10, 10, 10, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        /* Dark Mode UI (When Overlay is Active) */
+        body.text-mode-active #ui-layer {
+            color: #000;
+        }
+        body.text-mode-active .text-white {
+            color: #000 !important;
+        }
+        body.text-mode-active .text-gray-400 {
+            color: #4b5563 !important;
+        }
+        body.text-mode-active .control-panel {
+            background-color: rgba(255, 255, 255, 0.1); /* Lighter backdrop */
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px); /* Less blur to keep white clean */
+        }
+        body.text-mode-active .icon-btn {
+            color: #333;
+        }
+        body.text-mode-active .icon-btn:hover {
+            color: #000;
+        }
+
+        /* Range Slider Styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+            margin: 10px 0;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        
+        /* Thumb */
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+            margin-top: -5px; 
+            box-shadow: 0 0 10px rgba(255,255,255,0.8);
+            transition: transform 0.1s, background 0.3s;
+        }
+        body.text-mode-active input[type=range]::-webkit-slider-thumb {
+            background: #000;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        /* Track */
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 2px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.15);
+            border-radius: 1px;
+            transition: background 0.3s;
+        }
+        body.text-mode-active input[type=range]::-webkit-slider-runnable-track {
+            background: rgba(0,0,0,0.15);
+        }
+        
+        .panel-hidden {
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+        }
+        
+        .icon-btn {
+            color: rgba(255,255,255,0.7);
+            transition: color 0.2s;
+        }
+        .icon-btn:hover {
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="canvas"></canvas>
+
+    <!-- Punchhole Text Overlay -->
+    <div id="text-overlay" contenteditable="true" spellcheck="false">
+        <div class="fluid-text">CLARITY</div>
+    </div>
+
+    <div id="ui-layer" class="p-6">
+        <!-- Header -->
+        <div class="flex justify-between items-start w-full">
+            <div>
+                <h1 class="text-3xl font-light tracking-tight text-white mb-1 transition-colors">Clarity</h1>
+                <p class="text-xs text-gray-400 uppercase tracking-widest flex items-center gap-2 transition-colors">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Harmonic Flow / Denoised
+                </p>
+            </div>
+            
+            <div class="flex gap-3">
+                <!-- Text Mode Toggle -->
+                <button id="text-toggle" class="control-panel p-3 rounded-full hover:bg-white/10 text-white pointer-events-auto shadow-lg icon-btn group" title="Toggle Type Mode">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover:scale-110 transition-transform"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
+                </button>
+                
+                <!-- Settings Toggle -->
+                <button id="menu-toggle" class="control-panel p-3 rounded-full hover:bg-white/10 text-white pointer-events-auto shadow-lg icon-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Controls (Bottom Right) -->
+        <div id="controls" class="control-panel absolute bottom-6 right-6 w-64 p-5 rounded-2xl flex flex-col gap-4 shadow-2xl">
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-xs font-medium uppercase tracking-wider text-gray-400 transition-colors">Settings</span>
+                <span class="text-[10px] text-gray-500">v1.1</span>
+            </div>
+            
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs text-gray-300 transition-colors">
+                    <span>Flow Speed</span>
+                    <span id="speed-val">1.0</span>
+                </div>
+                <input type="range" id="speed" min="0" max="3" step="0.1" value="1.0">
+            </div>
+
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs text-gray-300 transition-colors">
+                    <span>Warp Scale</span>
+                    <span id="scale-val">1.0</span>
+                </div>
+                <input type="range" id="scale" min="0.5" max="2" step="0.1" value="1.0">
+            </div>
+            
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs text-gray-300 transition-colors">
+                    <span>Complexity</span>
+                    <span id="complex-val">0.66</span>
+                </div>
+                <input type="range" id="complexity" min="0" max="1" step="0.01" value="0.66">
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * WebGL Boilerplate & Shader Loading
+ */
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) {
+    alert('WebGL not supported');
+}
+
+// Vertex Shader (Simple Pass-through)
+const vsSource = `
+    attribute vec4 a_position;
+    void main() {
+        gl_Position = a_position;
+    }
+`;
+
+// Fragment Shader (The Harmonic Flow Logic)
+const fsSource = `
+    precision highp float;
+    
+    uniform vec2 u_resolution;
+    uniform float u_time;
+    uniform float u_speed;
+    uniform float u_scale;
+    uniform float u_complexity;
+
+    // Helper: SmoothFract (for textureless coloring)
+    vec3 smoothFract(vec3 x){ 
+        x = fract(x); 
+        return min(x, x*(1.-x)*12.); 
+    }
+
+    // Warp Function
+    vec2 W(vec2 p){
+        p = (p + 3.) * 4. * u_scale;
+        float t = (u_time * u_speed) / 2.;
+
+        // Layered sinusoidal feedback
+        for (int i=0; i<3; i++){
+            p += cos(p.yx*3. + vec2(t, 1.57))/3.;
+            p += sin(p.yx + t + vec2(1.57, 0))/2.;
+            p *= 1.3;
+        }
+
+        // NOISE REMOVED HERE for clarity
+        // p += fract(sin(p+vec2(13, 7))*5e5)*.03 - .015;
+
+        return mod(p, 2.) - 1.;
+    }
+
+    // Bump Mapping Function
+    float bumpFunc(vec2 p){ 
+        return length(W(p)) * 0.7071; 
+    }
+
+    void main() {
+        // Normalized pixel coordinates (from 0 to 1)
+        vec2 uv = (gl_FragCoord.xy - u_resolution.xy * 0.5) / u_resolution.y;
+        
+        // Ray/Surface setup
+        vec3 sp = vec3(uv, 0); 
+        vec3 rd = normalize(vec3(uv, 1)); 
+        vec3 lp = vec3(cos(u_time * 0.5)*0.5, sin(u_time * 0.5)*0.2, -1); 
+        vec3 sn = vec3(0, 0, -1); 
+
+        // Bump Mapping Logic
+        vec2 eps = vec2(4./u_resolution.y, 0);
+        float f = bumpFunc(sp.xy);
+        float fx = bumpFunc(sp.xy - eps.xy);
+        float fy = bumpFunc(sp.xy - eps.yx);
+        
+        float bumpFactor = 0.05;
+        
+        fx = (fx - f)/eps.x;
+        fy = (fy - f)/eps.x;
+        sn = normalize(sn + vec3(fx, fy, 0)*bumpFactor);
+
+        // Lighting
+        vec3 ld = lp - sp;
+        float lDist = max(length(ld), 0.0001);
+        ld /= lDist;
+
+        float atten = 1./(1. + lDist*lDist*0.15);
+        atten *= f*0.9 + 0.1;
+
+        float diff = max(dot(sn, ld), 0.);
+        diff = pow(diff, 4.)*u_complexity + pow(diff, 8.)*(1.0 - u_complexity); 
+        
+        float spec = pow(max(dot(reflect(-ld, sn), -rd), 0.), 12.);
+
+        // Textureless Color Generation
+        // Using the warp function to generate organic colors
+        vec3 texCol = smoothFract(vec3(W(sp.xy), 0.5 + 0.5*sin(u_time*0.2))).xyy * 0.1 + 0.2;
+        
+        // Final Color Mix
+        vec3 col = (texCol * (diff * vec3(1, 0.97, 0.92) * 2. + 0.5) + vec3(1, 0.6, 0.2) * spec * 2.) * atten;
+
+        // Faux Environment Reflection
+        float ref = max(dot(reflect(rd, sn), vec3(1)), 0.);
+        col += col * pow(ref, 4.) * vec3(0.25, 0.5, 1) * 3.;
+
+        // Gamma correction
+        gl_FragColor = vec4(sqrt(clamp(col, 0., 1.)), 1.0);
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+function createProgram(gl, vsSource, fsSource) {
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+        return null;
+    }
+    return program;
+}
+
+const program = createProgram(gl, vsSource, fsSource);
+const positionLocation = gl.getAttribLocation(program, "a_position");
+
+// Full screen triangle
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,
+     3, -1,
+    -1,  3,
+]), gl.STATIC_DRAW);
+
+// Uniform locations
+const resLocation = gl.getUniformLocation(program, "u_resolution");
+const timeLocation = gl.getUniformLocation(program, "u_time");
+const speedLocation = gl.getUniformLocation(program, "u_speed");
+const scaleLocation = gl.getUniformLocation(program, "u_scale");
+const complexLocation = gl.getUniformLocation(program, "u_complexity");
+
+// State
+let startTime = performance.now();
+const state = {
+    speed: 1.0,
+    scale: 1.0,
+    complexity: 0.66
+};
+
+// UI Handling
+const speedInput = document.getElementById('speed');
+const scaleInput = document.getElementById('scale');
+const complexInput = document.getElementById('complexity');
+const speedVal = document.getElementById('speed-val');
+const scaleVal = document.getElementById('scale-val');
+const complexVal = document.getElementById('complex-val');
+const menuBtn = document.getElementById('menu-toggle');
+const textBtn = document.getElementById('text-toggle');
+const controlsPanel = document.getElementById('controls');
+const textOverlay = document.getElementById('text-overlay');
+
+speedInput.addEventListener('input', (e) => {
+    state.speed = parseFloat(e.target.value);
+    speedVal.textContent = state.speed.toFixed(1);
+});
+scaleInput.addEventListener('input', (e) => {
+    state.scale = parseFloat(e.target.value);
+    scaleVal.textContent = state.scale.toFixed(1);
+});
+complexInput.addEventListener('input', (e) => {
+    state.complexity = parseFloat(e.target.value);
+    complexVal.textContent = state.complexity.toFixed(2);
+});
+
+menuBtn.addEventListener('click', () => {
+    controlsPanel.classList.toggle('panel-hidden');
+});
+
+textBtn.addEventListener('click', () => {
+    const isActive = textOverlay.classList.toggle('active');
+    document.body.classList.toggle('text-mode-active');
+    
+    // Auto-focus the editable area when opened
+    if (isActive) {
+        textOverlay.focus();
+    }
+});
+
+// Resize handler
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Animation Loop
+function render() {
+    const time = (performance.now() - startTime) * 0.001;
+
+    gl.useProgram(program);
+    gl.enableVertexAttribArray(positionLocation);
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    gl.uniform2f(resLocation, canvas.width, canvas.height);
+    gl.uniform1f(timeLocation, time);
+    gl.uniform1f(speedLocation, state.speed);
+    gl.uniform1f(scaleLocation, state.scale);
+    gl.uniform1f(complexLocation, state.complexity);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>

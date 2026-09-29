@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Circle Grid Morph</title>
+  <style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <script>
+    const canvas = document.getElementById("glcanvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+    if (!gl) alert("WebGL not supported");
+
+    const vertSrc = `
+      attribute vec2 position;
+      void main() { gl_Position = vec4(position, 0.0, 1.0); }
+    `;
+
+    const fragSrc = `
+      #ifdef GL_ES
+      precision mediump float;
+      #endif
+      uniform vec2 u_resolution;
+      uniform vec2 u_mouse;
+      uniform float u_time;
+      uniform vec2 u_click_pos;
+      uniform float u_click_time;
+
+      vec2 tile(vec2 st, float zoom){
+          st *= zoom;
+          return fract(st);
+      }
+      float circle(vec2 st, float radius){
+          vec2 pos = vec2(0.5)-st;
+          radius *= 0.75;
+          return 1.-smoothstep(radius-(radius*0.05),radius+(radius*0.05),dot(pos,pos)*3.14);
+      }
+      float circlePattern(vec2 st, float radius) {
+          return  circle(st+vec2(0.,-.5), radius)+
+                  circle(st+vec2(0.,.5), radius)+
+                  circle(st+vec2(-.5,0.), radius)+
+                  circle(st+vec2(.5,0.), radius);
+      }
+      void main(){
+          vec2 st = gl_FragCoord.xy/u_resolution.xy;
+          float aspect = u_resolution.x/u_resolution.y;
+          st.x *= aspect;
+          
+          // Click Ripple Logic
+          vec2 cPos = u_click_pos;
+          cPos.x *= aspect;
+          float dist = distance(st, cPos);
+          float tClick = u_time - u_click_time;
+          
+          if(tClick > 0.0 && tClick < 2.5) {
+             float waveFront = tClick * 1.5;
+             float waveWidth = 0.15;
+             float shock = smoothstep(waveFront - waveWidth, waveFront, dist) 
+                         - smoothstep(waveFront, waveFront + waveWidth, dist);
+             st += normalize(st - cPos) * shock * 0.15 * exp(-tClick*2.0);
+          }
+
+          vec3 color = vec3(0.0);
+          vec2 grid1 = tile(st,7.);
+          grid1 = tile(st + vec2(cos(u_time),sin(u_time))*0.01,7.);
+          color += mix(vec3(0.075,0.114,0.329),vec3(0.973,0.843,0.675),circlePattern(grid1,0.23)-circlePattern(grid1,0.01));
+          
+          vec2 grid2 = tile(st,3.);
+          grid2 = tile(st + vec2(cos(u_time),sin(u_time))*0.02 ,3.);
+          color = mix(color, vec3(0.761,0.247,0.102), circlePattern(grid2,0.2)) - circlePattern(grid2,0.05);
+          
+          gl_FragColor = vec4(color,1.0);
+      }
+    `;
+
+    function createProgram(vs, fs) {
+      const p = gl.createProgram();
+      const addShader = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        gl.attachShader(p, s);
+      };
+      addShader(gl.VERTEX_SHADER, vs);
+      addShader(gl.FRAGMENT_SHADER, fs);
+      gl.linkProgram(p);
+      gl.useProgram(p);
+      return p;
+    }
+
+    const program = createProgram(vertSrc, fragSrc);
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const uTime = gl.getUniformLocation(program, "u_time");
+    const uRes = gl.getUniformLocation(program, "u_resolution");
+    const uMouse = gl.getUniformLocation(program, "u_mouse");
+    const uClickPos = gl.getUniformLocation(program, "u_click_pos");
+    const uClickTime = gl.getUniformLocation(program, "u_click_time");
+
+    let mouse = { x: 0, y: 0 };
+    let clickData = { x: 0.5, y: 0.5, time: -100.0 };
+    const startTime = performance.now();
+
+    window.addEventListener("pointermove", e => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    });
+
+    window.addEventListener("pointerdown", e => {
+      const rect = canvas.getBoundingClientRect();
+      clickData.x = (e.clientX - rect.left) / rect.width;
+      clickData.y = 1.0 - ((e.clientY - rect.top) / rect.height);
+      clickData.time = (performance.now() - startTime) / 1000;
+    });
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    function loop() {
+      gl.uniform1f(uTime, (performance.now() - startTime) / 1000);
+      gl.uniform2f(uMouse, mouse.x, mouse.y);
+      gl.uniform1f(uClickTime, clickData.time);
+      gl.uniform2f(uClickPos, clickData.x, clickData.y);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

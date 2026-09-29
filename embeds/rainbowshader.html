@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Goo Landing</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;800&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Inter', sans-serif;
+            color: white;
+        }
+
+        /* 
+           The Shader Container 
+           We use absolute positioning to cover the screen, 
+           but the Masking applies to this specific div.
+        */
+        #shader-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            /* Mask properties set via JS for dynamic blobs */
+            -webkit-mask-repeat: no-repeat;
+            mask-repeat: no-repeat;
+            -webkit-mask-position: center;
+            mask-position: center;
+            -webkit-mask-size: cover;
+            mask-size: cover;
+            opacity: 0; /* Fade in on load */
+            transition: opacity 1.5s ease-in-out;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* UI Overlay Layer */
+        #ui-layer {
+            position: relative;
+            z-index: 10;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            padding-left: 10vw;
+            pointer-events: none; /* Let mouse pass through to shader mainly */
+            mix-blend-mode: screen; /* Cool blending with the background */
+        }
+
+        h1 {
+            font-size: 8vw;
+            line-height: 0.9;
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: -0.02em;
+            background: linear-gradient(to right, #fff, #aaa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        p {
+            font-size: 1.5rem;
+            max-width: 500px;
+            margin-top: 20px;
+            font-weight: 300;
+            opacity: 0.8;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.8);
+        }
+
+        .btn {
+            margin-top: 40px;
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+            pointer-events: auto; /* Re-enable clicks */
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: 800;
+        }
+
+        .btn:hover {
+            background: white;
+            color: black;
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(255,255,255,0.3);
+        }
+
+        /* Instructions */
+        .hint {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.4);
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="shader-container">
+        <canvas id="glcanvas"></canvas>
+    </div>
+
+    <div id="ui-layer">
+        <h1>Fluid<br>Intelligence</h1>
+        <p>Experience the next generation of reactive web interfaces. Move your cursor to disturb the field.</p>
+        <button class="btn">Get Started</button>
+    </div>
+
+    <div class="hint">
+        HORIZONTAL: DISTORTION INTENSITY<br>
+        VERTICAL: SPECTRUM SHIFT
+    </div>
+
+    <!-- VERTEX SHADER -->
+    <script type="x-shader/x-vertex" id="vs">
+        attribute vec2 position;
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+        }
+    </script>
+
+    <!-- FRAGMENT SHADER -->
+    <script type="x-shader/x-fragment" id="fs">
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform vec2 u_mouse;
+
+        // --- NOISE FUNCTIONS ---
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+        float snoise(vec2 v) {
+            const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                                -0.577350269189626, 0.024390243902439);
+            vec2 i  = floor(v + dot(v, C.yy) );
+            vec2 x0 = v -   i + dot(i, C.xx);
+            vec2 i1;
+            i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+            vec4 x12 = x0.xyxy + C.xxzz;
+            x12.xy -= i1;
+            i = mod289(i);
+            vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+                + i.x + vec3(0.0, i1.x, 1.0 ));
+            vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+            m = m*m ;
+            m = m*m ;
+            vec3 x = 2.0 * fract(p * C.www) - 1.0;
+            vec3 h = abs(x) - 0.5;
+            vec3 ox = floor(x + 0.5);
+            vec3 a0 = x - ox;
+            m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+            vec3 g;
+            g.x  = a0.x  * x0.x  + h.x  * x0.y;
+            g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+            return 130.0 * dot(m, g);
+        }
+
+        // --- COLOR PALETTE ---
+        // Cosine based palette, 4 vec3 params
+        vec3 palette( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d ) {
+            return a + b*cos( 6.28318*(c*t+d) );
+        }
+
+        void main() {
+            vec2 st = gl_FragCoord.xy / u_resolution.xy;
+            float aspect = u_resolution.x / u_resolution.y;
+            st.x *= aspect;
+
+            // MOUSE INTERACTION
+            float mx = u_mouse.x; // 0.0 to 1.0
+            float my = u_mouse.y; // 0.0 to 1.0
+
+            // Base scaling for coordinates
+            vec2 uv = st * 3.0;
+
+            // DOMAIN WARPING
+            float time = u_time * 0.2;
+            
+            // Warp 1
+            vec2 q = vec2(0.);
+            q.x = snoise(uv + vec2(0.0, time));
+            q.y = snoise(uv + vec2(1.0, time));
+
+            // Interaction: Mouse X controls how much the warp distorts the next layer
+            float warpIntensity = 1.0 + (mx * 3.0); 
+
+            // Warp 2
+            vec2 r = vec2(0.);
+            r.x = snoise(uv + warpIntensity * q + vec2(1.7, 9.2) + 0.15 * time);
+            r.y = snoise(uv + warpIntensity * q + vec2(8.3, 2.8) + 0.126 * time);
+
+            // Final noise field
+            float f = snoise(uv + r);
+
+            // COLOR MAPPING
+            // We use the noise value 'f' and the warp length 'length(q)' to drive color
+            
+            // Palette parameters. We shift 'd' based on mouse Y to cycle colors
+            vec3 a = vec3(0.5, 0.5, 0.5);
+            vec3 b = vec3(0.5, 0.5, 0.5);
+            vec3 c = vec3(1.0, 1.0, 1.0);
+            
+            // Shift phase with mouse Y
+            vec3 d = vec3(0.0, 0.33, 0.67) + vec3(my); 
+
+            // Mix pattern for color selection
+            float pattern = f * 2.0 + length(q);
+            
+            vec3 col = palette(pattern, a, b, c, d);
+
+            // Create distinct bands or "liquid metal" ridges
+            col = mix(col, vec3(0.0), smoothstep(0.4, 0.45, abs(f))); // Dark veins
+            
+            // Highlights
+            float highlight = smoothstep(0.7, 0.9, f);
+            col += vec3(highlight);
+
+            // Final output
+            gl_FragColor = vec4(col, 1.0);
+        }
+    </script>
+
+    <script>
+        // --- 1. DYNAMIC SVG BLOB GENERATOR ---
+        function generateBlobMask() {
+            // Configuration for the blob generation
+            const count = 30; // Number of blobs
+            const minSize = 100;
+            const maxSize = 400;
+            const viewBoxSize = 1000;
+            
+            let circles = '';
+            
+            // Generate random circles clustered somewhat centrally but spreading out
+            for(let i=0; i<count; i++) {
+                // Skew random towards center slightly for a solid core
+                let cx = (Math.random() * 1.2 - 0.1) * viewBoxSize;
+                let cy = (Math.random() * 1.2 - 0.1) * viewBoxSize;
+                let r = minSize + Math.random() * (maxSize - minSize);
+                
+                circles += `<circle cx="${cx}" cy="${cy}" r="${r}" />`;
+            }
+
+            // The SVG String
+            // We use a high stdDeviation for the blur and a sharp contrast in colorMatrix (The "Goo" effect)
+            const svgString = `
+                <svg viewBox="0 0 ${viewBoxSize} ${viewBoxSize}" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <filter id="goo">
+                            <feGaussianBlur in="SourceGraphic" stdDeviation="40" result="blur" />
+                            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
+                        </filter>
+                    </defs>
+                    <g filter="url(#goo)" fill="white">
+                        ${circles}
+                    </g>
+                </svg>
+            `;
+
+            // Convert to Data URI
+            const encoded = encodeURIComponent(svgString.replace(/\s+/g, " "));
+            return `url("data:image/svg+xml;charset=utf-8,${encoded}")`;
+        }
+
+        // Apply the mask
+        const container = document.getElementById('shader-container');
+        container.style.maskImage = generateBlobMask();
+        container.style.webkitMaskImage = generateBlobMask();
+        
+        // Trigger fade in
+        setTimeout(() => { container.style.opacity = 1; }, 100);
+
+
+        // --- 2. WEBGL BOILERPLATE ---
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl');
+        const program = gl.createProgram();
+
+        const createShader = (type, source) => {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, source);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(s));
+            }
+            return s;
+        };
+
+        const vsSource = document.getElementById('vs').innerText;
+        const fsSource = document.getElementById('fs').innerText;
+
+        gl.attachShader(program, createShader(gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error(gl.getProgramInfoLog(program));
+        }
+        
+        gl.useProgram(program);
+
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            -1, -1, 
+             1, -1, 
+            -1,  1, 
+            -1,  1, 
+             1, -1, 
+             1,  1
+        ]), gl.STATIC_DRAW);
+
+        const pos = gl.getAttribLocation(program, "position");
+        gl.enableVertexAttribArray(pos);
+        gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+        const uRes = gl.getUniformLocation(program, "u_resolution");
+        const uMouse = gl.getUniformLocation(program, "u_mouse");
+        const uTime = gl.getUniformLocation(program, "u_time");
+
+        let mx = 0.5, my = 0.5;
+        // Smooth mouse following
+        let targetMx = 0.5, targetMy = 0.5;
+
+        window.addEventListener('mousemove', e => {
+            targetMx = e.clientX / window.innerWidth;
+            targetMy = 1.0 - (e.clientY / window.innerHeight);
+        });
+
+        // Initialize time
+        let startTime = performance.now();
+
+        function render() {
+            let time = (performance.now() - startTime) * 0.001;
+
+            // Simple Lerp for smoother mouse input
+            mx += (targetMx - mx) * 0.05;
+            my += (targetMy - my) * 0.05;
+
+            // Resize
+            const displayWidth  = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+
+            gl.uniform2f(uRes, canvas.width, canvas.height);
+            gl.uniform2f(uMouse, mx, my);
+            gl.uniform1f(uTime, time);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+
+    </script>
+</body>
+</html>

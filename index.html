@@ -1,18 +1,572 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>moww.space</title>
-<style>
-body{margin:0;min-height:100vh;display:grid;place-content:center;background:#0b0d10;color:#c9d1d9;font:15px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
-h1{font-weight:400;font-size:1.05rem;margin:0 0 .4rem}
-p{margin:0;color:#7d8590}
-code{color:#58a6ff}
-</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REPOS INDEX — razodin137 + mvvk-space</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>moww.space</h1>
-<p>this is the user site &mdash; projects publish at <code>/&lt;repo&gt;</code> paths</p>
+<div class="wrap">
+
+  <header>
+    <div class="stamp">LIVE DATA</div>
+    <h1>REPOS <span class="accent">INDEX</span></h1>
+    <div class="sub">every repo — razodin137 + mvvk-space — finished repos up top in chronological order, works-in-progress parked at the bottom with badges for what they're missing. repo list pre-fetched into static data.json by a scheduled Actions workflow (your visit never touches the GitHub API), readme checks via CDN. no babysitting.</div>
+    <div id="meta">fetching…</div>
+    <a class="shell-nav" href="marquee.html">INDEX_OF_WORKS ↗</a>
+  </header>
+
+  <div class="controls">
+    <input id="search" type="text" placeholder="filter repos… (name or description)" autocomplete="off">
+    <button class="fbtn on" data-f="all">ALL</button>
+    <button class="fbtn" data-f="razodin137">RAZODIN137</button>
+    <button class="fbtn" data-f="mvvk-space">MVVK-SPACE</button>
+    <button class="fbtn" data-f="pages">PAGES</button>
+    <button class="fbtn" data-f="nopages">NO PAGES</button>
+    <button class="fbtn" data-f="nohome">NO HOMEPAGE</button>
+    <button class="fbtn" data-f="noreadme">NO README</button>
+  </div>
+
+  <div class="keys">
+    <span><span class="kbd">J</span>/<span class="kbd">K</span> or <span class="kbd">↓</span>/<span class="kbd">↑</span> or click to select</span>
+    <span><span class="kbd">O</span> open site</span>
+    <span><span class="kbd">P</span> preview</span>
+    <span><span class="kbd">M</span> readme</span>
+    <span><span class="kbd">R</span> repo</span>
+    <span><span class="kbd">/</span> search</span>
+  </div>
+
+  <div id="root"></div>
+
+  <footer>data: api.github.com (repo lists, fetched by a scheduled GitHub Actions workflow) + data.jsdelivr.com &amp; raw.githubusercontent.com (readmes, client-side) — no token in your browser</footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const metaEl = $("#meta");
+const rootEl = $("#root");
+
+const OWNERS = ["razodin137", "mvvk-space"];
+let ALL = [];
+
+/* ---------- README cache ----------
+   { "owner/repo": { v: 0|1, f: filename|null, b: branch|null, t: timestamp } }
+   v = has a readme, f = the actual filename (case as on GitHub), b = branch it
+   was found on. Kept 7 days. Key versioned (v2) so older cache shapes are
+   ignored instead of misread. */
+const RC_KEY = "repos-index:readme:v2";
+const RC_TTL = 7 * 24 * 3600 * 1000;
+let readmeCache = {};
+try { readmeCache = JSON.parse(localStorage.getItem(RC_KEY)) || {}; } catch (e) {}
+function saveReadmeCache() {
+  try { localStorage.setItem(RC_KEY, JSON.stringify(readmeCache)); } catch (e) {}
+}
+
+/* ---------- repo list cache ----------
+   { owner: { etag, savedAt, repos } } — the raw API list, so the site still
+   renders (with a note) if the API is slow, down, or rate-limited.
+
+   The etag only gets trusted while the cache is FRESH (ETAG_TTL). Why: GitHub's
+   list etags do NOT change when you flip has_pages on a repo (enabling Pages
+   doesn't bump updated_at), so an unconditional etag match happily served a
+   stale cached list forever — the dashboard swore only 19 repos had pages when
+   the real total was 53, until a push finally changed the etag. Within the TTL
+   a 304 is free and safe; past it we refetch and pay 1 request per owner. */
+const LC_KEY = "repos-index:lists:v2";
+const ETAG_TTL = 10 * 60 * 1000; // 10 minutes
+let listCache = {};
+try { listCache = JSON.parse(localStorage.getItem(LC_KEY)) || {}; } catch (e) {}
+function saveListCache(owner, etag, repos) {
+  listCache[owner] = { etag, savedAt: Date.now(), repos };
+  try { localStorage.setItem(LC_KEY, JSON.stringify(listCache)); } catch (e) {}
+}
+// only trust caches that actually hold raw API repo objects
+function isValidList(repos) {
+  return Array.isArray(repos) &&
+    repos.every(r => r && r.owner && r.owner.login && typeof r.has_pages === "boolean");
+}
+
+async function fetchRepos(owner) {
+  const out = [];
+  let page = 1;
+  while (true) {
+    const cached = listCache[owner];
+    const fresh = cached && cached.etag && isValidList(cached.repos) && Date.now() - cached.savedAt < ETAG_TTL;
+    const headers = {};
+    if (page === 1 && fresh) headers["If-None-Match"] = cached.etag;
+    const res = await fetch(`https://api.github.com/users/${owner}/repos?per_page=100&sort=pushed&page=${page}`, { cache: "no-store", headers });
+    if (res.status === 304 && fresh) {
+      // unchanged since last visit — doesn't count against the rate limit
+      return { repos: cached.repos, note: null };
+    }
+    if (res.status === 403 || res.status === 429) {
+      if (cached && isValidList(cached.repos)) {
+        return { repos: cached.repos, note: `showing cached ${owner} list (saved ${new Date(cached.savedAt).toLocaleString()})` };
+      }
+      const reset = new Date(Number(res.headers.get("x-ratelimit-reset")) * 1000);
+      throw new Error(`${owner}: rate limit, resets ${reset.toLocaleTimeString()}`);
+    }
+    if (!res.ok) throw new Error(`${owner}: API error ${res.status}`);
+    const etag = res.headers.get("etag");
+    const batch = await res.json();
+    out.push(...batch);
+    if (page === 1 && etag && batch.length) saveListCache(owner, etag, out.slice());
+    if (batch.length < 100) break;
+    page++;
+  }
+  return { repos: out, note: null };
+}
+
+/* raw API repo object -> the shape the cards use. Works for both sources:
+   data.json (committed by the Actions workflow, with owner flattened to a
+   string) and the live-fetch fallback (raw API objects). */
+function toRepo(r) {
+  return {
+    owner: typeof r.owner === "string" ? r.owner : r.owner.login,
+    name: r.name,
+    desc: r.description,
+    homepage: r.homepage && r.homepage.trim() ? r.homepage.trim() : null,
+    hasPages: r.has_pages,
+    url: r.html_url,
+    lang: r.language,
+    pushed: r.pushed_at,
+    created: r.created_at,
+    fork: r.fork
+  };
+}
+
+function show(raw, metaText) {
+  ALL = raw.map(toRepo);
+  metaEl.textContent = metaText;
+  render();
+  updateCounts();
+  probeReadmes(); // fill in README status via CDN (not rate-limited)
+}
+
+async function load() {
+  /* preferred source: data.json, committed by the Actions workflow in this
+     repo (fetched there with the built-in GITHUB_TOKEN). Serving it means
+     visitors' browsers never call api.github.com, so nobody — you included —
+     can hit the 60/hr-per-IP unauthenticated limit. */
+  try {
+    const res = await fetch("data.json", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.repos) && data.repos.length) {
+        const when = data.fetchedAt ? new Date(data.fetchedAt) : null;
+        const stamp = when && !isNaN(when) ? when.toLocaleString() : "unknown time";
+        show(data.repos,
+          `${data.repos.length} repos total — ${data.repos.filter(r => r.has_pages).length} with pages — pre-fetched ${stamp}, no API calls from your visit`);
+        return;
+      }
+    }
+  } catch (e) { /* no data.json yet, or it failed to load — fall back to live */ }
+
+  /* fallback: the original live client-side fetch — still rate-limited per
+     visitor IP, but it keeps the site working before the first workflow run
+     or if data.json can't be loaded */
+  const results = await Promise.allSettled(OWNERS.map(fetchRepos));
+  const lists = [], notes = [], errors = [];
+  for (const res of results) {
+    if (res.status === "fulfilled") {
+      lists.push(res.value.repos);
+      if (res.value.note) notes.push(res.value.note);
+    } else {
+      errors.push(String(res.reason?.message || res.reason));
+    }
+  }
+  if (!lists.length) {
+    metaEl.classList.add("err");
+    metaEl.textContent = "ERROR: " + errors.join(" · ");
+    rootEl.innerHTML = `<div class="empty">couldn't load data.json or reach the GitHub API. try reloading.</div>`;
+    return;
+  }
+  const raw = lists.flat();
+  let meta = `${raw.length} repos total — ${raw.filter(r => r.has_pages).length} with pages — loaded live ${new Date().toLocaleTimeString()}`;
+  if (notes.length) meta += ` — ${notes.join(" · ")}`;
+  if (errors.length) meta += ` — couldn't fetch: ${errors.join(" · ")}`;
+  show(raw, meta);
+  metaEl.classList.toggle("err", errors.length > 0);
+}
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s ?? "";
+  return d.innerHTML;
+}
+
+function siteUrl(r) {
+  return r.homepage || (r.hasPages ? `https://${r.owner}.github.io/${r.name}/` : null);
+}
+
+/* ---------- README presence, no api.github.com, no token ----------
+   jsDelivr's data API mirrors GitHub repos on their CDN — no 60/hr limit, full
+   CORS. One call lists the root files; a README shows up in that listing.
+   Some repos are too big for jsDelivr to enumerate (403) — for those we probe
+   raw.githubusercontent.com directly (also CDN-served, also no API limit).
+   Either way we record the exact filename + branch so the expander can fetch
+   the content. Results cached in localStorage for 7 days. */
+const README_LOWER = ["readme.md", "readme", "readme.markdown", "readme.txt", "readme.rst"];
+const README_RAW = ["readme.md", "README.md", "readme", "README", "readme.markdown", "README.markdown", "readme.txt", "README.txt", "readme.rst", "README.rst"];
+const BRANCHES = ["master", "main"];
+
+async function probeOne(r) {
+  const k = r.owner + "/" + r.name;
+  for (const b of BRANCHES) {
+    let res;
+    try {
+      res = await fetch(`https://data.jsdelivr.com/v1/packages/gh/${k}@${b}?structure=flat`);
+    } catch (e) { return null; } // network hiccup — retried next visit
+    if (!res.ok) continue;       // branch not on the CDN (or repo too big for it)
+    const data = await res.json();
+    const hit = (data.files || []).find(f => README_LOWER.includes((f.name || "").replace(/^\//, "").toLowerCase()));
+    return { v: hit ? 1 : 0, f: hit ? hit.name.replace(/^\//, "") : null, b };
+  }
+  // jsDelivr couldn't enumerate the repo — probe raw files directly
+  for (const b of BRANCHES) {
+    for (const name of README_RAW) {
+      let res;
+      try {
+        res = await fetch(`https://raw.githubusercontent.com/${k}/${b}/${name}`);
+      } catch (e) { return null; } // network hiccup — retried next visit
+      if (res.status === 404) continue; // definitively not this filename
+      if (res.ok) return { v: 1, f: name, b };
+      return null;                       // unexpected status — retried next visit
+    }
+  }
+  return { v: 0, f: null, b: null };      // every candidate 404'd — genuinely no README
+}
+
+async function probeReadmes() {
+  const cutoff = Date.now() - RC_TTL;
+  const unknown = ALL.filter(r => {
+    const k = r.owner + "/" + r.name;
+    return !readmeCache[k] || readmeCache[k].t < cutoff;
+  });
+  if (!unknown.length) { updateCounts(); return; }
+
+  let done = 0;
+  async function worker() {
+    while (done < unknown.length) {
+      const r = unknown[done++];
+      const k = r.owner + "/" + r.name;
+      const p = await probeOne(r);
+      if (p === null) continue; // couldn't tell — retried next visit
+      readmeCache[k] = { ...p, t: Date.now() };
+      saveReadmeCache();
+      updateChecks(r);
+      updateCounts();
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  updateCounts();
+}
+
+let renderQueued = false;
+function updateChecks(r) {
+  // the README probe landed asynchronously. if the repo's done/wip status
+  // changed it must move between sections — queue a debounced full render.
+  // otherwise (still wip, or still done) just swap the card in place so the
+  // README button / missing badges update without disturbing the page.
+  const el = rootEl.querySelector(`.card[data-owner="${CSS.escape(r.owner)}"][data-name="${CSS.escape(r.name)}"]`);
+  if (!el) return;
+  const fresh = card(r);
+  if (el.classList.contains("wip") !== fresh.classList.contains("wip")) {
+    if (!renderQueued) {
+      renderQueued = true;
+      setTimeout(() => { renderQueued = false; render(true); }, 250);
+    }
+  } else {
+    if (el.classList.contains("sel")) fresh.classList.add("sel");
+    el.replaceWith(fresh);
+  }
+}
+
+/* ---------- README expand (click-to-read) ---------- */
+const readmeBodies = new Map(); // "owner/repo" -> { text, f, b } — in-memory, this visit only
+
+async function toggleReadme(r, el, btn) {
+  const view = el.querySelector(".readme-view");
+  const opening = view.classList.toggle("open");
+  btn.innerHTML = opening ? `README ▴<span class="kbd">M</span>` : `README ▾<span class="kbd">M</span>`;
+  if (!opening) return;
+
+  const k = r.owner + "/" + r.name;
+  const pre = view.querySelector(".readme-body");
+  pre.textContent = "loading…";
+  let body = readmeBodies.get(k);
+  if (!body) {
+    body = await fetchReadmeBody(k);
+    if (body) readmeBodies.set(k, body);
+  }
+  if (!body) {
+    pre.textContent = "couldn't load the readme — close and reopen to retry";
+    return;
+  }
+  const head = view.querySelector(".readme-head");
+  const lines = body.text.split("\n").length;
+  const kb = (new Blob([body.text]).size / 1024).toFixed(1);
+  head.innerHTML = `<b>${esc(body.f)}</b> · ${lines} lines · ${kb} KB · raw markdown — <a href="https://github.com/${esc(k)}/blob/${esc(body.b)}/${esc(body.f)}" target="_blank">view on GitHub ↗</a>`;
+  pre.textContent = body.text;
+}
+
+async function fetchReadmeBody(k) {
+  const c = readmeCache[k];
+  if (!c || !c.v || !c.f || !c.b) return null;
+  try {
+    const res = await fetch(`https://raw.githubusercontent.com/${k}/${c.b}/${encodeURIComponent(c.f)}`);
+    if (!res.ok) return null;
+    return { text: await res.text(), f: c.f, b: c.b };
+  } catch (e) { return null; }
+}
+
+/* ---------- combined counts on the filter buttons ---------- */
+const FILTER_LABELS = {
+  all: "ALL", razodin137: "RAZODIN137", "mvvk-space": "MVVK-SPACE",
+  pages: "PAGES", nopages: "NO PAGES", nohome: "NO HOMEPAGE", noreadme: "NO README"
+};
+function updateCounts() {
+  document.querySelectorAll(".fbtn").forEach(b => {
+    const f = b.dataset.f;
+    let n;
+    if (!ALL.length) n = "…";
+    else if (f === "all") n = ALL.length;
+    else if (OWNERS.includes(f)) n = ALL.filter(r => r.owner === f).length;
+    else if (f === "pages") n = ALL.filter(r => r.hasPages).length;
+    else if (f === "nopages") n = ALL.filter(r => !r.hasPages).length;
+    else if (f === "nohome") n = ALL.filter(r => !r.homepage).length;
+    else if (f === "noreadme") n = ALL.filter(r => readmeCache[r.owner + "/" + r.name]?.v === 0).length;
+    else n = "?";
+    b.textContent = `${FILTER_LABELS[f]} (${n})`;
+  });
+}
+
+/* ---------- completion — finished repos earn the top ---------- */
+/* a repo is "done" when it has a description, pages enabled, a homepage
+   set, and a README (known via the probe). buttons only appear once their
+   requirement is met — OPEN SITE / PREVIEW need a site (homepage or pages),
+   README needs a readme. while the README probe is still in flight we can't
+   judge completion yet, so such repos stay in the needs-work section with a
+   "checking readme…" note until the answer lands. */
+function missingList(r) {
+  const miss = [];
+  if (!r.desc) miss.push("description");
+  if (!r.hasPages) miss.push("pages");
+  if (!r.homepage) miss.push("homepage");
+  const c = readmeCache[r.owner + "/" + r.name];
+  if (c) { if (!c.v) miss.push("readme"); }
+  return miss;
+}
+function isComplete(r) { return missingList(r).length === 0; }
+
+function card(r) {
+  const site = siteUrl(r);
+  const c = readmeCache[r.owner + "/" + r.name];
+  const miss = missingList(r);
+  const done = miss.length === 0;
+  const checking = !c; // readme probe still in flight
+  const updated = new Date(r.pushed).toISOString().slice(0, 10);
+  const el = document.createElement("div");
+  el.className = "card" + (done ? "" : " wip");
+  el.dataset.owner = r.owner;
+  el.dataset.name = r.name;
+  el.dataset.text = (r.name + " " + (r.desc || "")).toLowerCase();
+
+  el.innerHTML = `
+    <div class="card-top">
+      <a class="name" href="${esc(r.url)}" target="_blank">${esc(r.name)}</a>
+    </div>
+    ${r.desc ? `<div class="desc">${esc(r.desc)}</div>` : `<div class="desc none">// no description set</div>`}
+    ${done || checking ? "" : `<div class="wip-head">needs work — missing:</div>
+      <div class="checks">${miss.map(m => `<span class="miss">${m.toUpperCase()}</span>`).join("")}</div>`}
+    ${checking ? `<div class="wip-head">checking readme…</div>` : ""}
+    <div class="meta">owner: <b>${esc(r.owner)}</b> · updated: <b>${updated}</b>${r.lang ? " · lang: <b>" + esc(r.lang) + "</b>" : ""}${r.fork ? " · fork" : ""}</div>
+    <div class="card-actions">
+      ${site ? `<a class="abtn site" href="${esc(site)}" target="_blank">OPEN SITE ↗<span class="kbd">O</span></a>
+                <button class="abtn prev-toggle">PREVIEW ▾<span class="kbd">P</span></button>` : ""}
+      ${c?.v ? `<button class="abtn readme-toggle">README ▾<span class="kbd">M</span></button>` : ""}
+      <a class="abtn" href="${esc(r.url)}" target="_blank">REPO ↗<span class="kbd">R</span></a>
+    </div>
+    ${site ? `<div class="preview">
+                <iframe loading="lazy" sandbox="allow-scripts allow-forms" title="preview of ${esc(r.name)}"></iframe>
+                <div class="preview-note">inline preview — some sites block embedding; if blank, use OPEN SITE</div>
+              </div>` : ""}
+    ${c?.v ? `<div class="readme-view">
+                <div class="readme-head"></div>
+                <pre class="readme-body"></pre>
+              </div>` : ""}
+  `;
+
+  const toggle = el.querySelector(".prev-toggle");
+  if (toggle) {
+    const box = el.querySelector(".preview");
+    const frame = el.querySelector("iframe");
+    toggle.addEventListener("click", () => {
+      const open = box.classList.toggle("open");
+      toggle.innerHTML = open ? `PREVIEW ▴<span class="kbd">P</span>` : `PREVIEW ▾<span class="kbd">P</span>`;
+      if (open && !frame.dataset.loaded) {
+        frame.src = site;
+        frame.dataset.loaded = "1";
+      }
+    });
+  }
+  const rbtn = el.querySelector(".readme-toggle");
+  if (rbtn) rbtn.addEventListener("click", () => toggleReadme(r, el, rbtn));
+  return el;
+}
+
+let filter = "all";
+let query = "";
+
+function render() {
+  const frag = document.createDocumentFragment();
+  const q = query.trim().toLowerCase();
+
+  const sections = OWNERS.map(owner => {
+    let repos = ALL.filter(r => r.owner === owner);
+    if (filter === "pages") repos = repos.filter(r => r.hasPages);
+    if (filter === "nopages") repos = repos.filter(r => !r.hasPages);
+    if (filter === "nohome") repos = repos.filter(r => !r.homepage);
+    if (filter === "noreadme") repos = repos.filter(r => readmeCache[r.owner + "/" + r.name]?.v === 0);
+    if (filter !== "all" && filter !== "pages" && filter !== "nopages" && filter !== "nohome" && filter !== "noreadme" && filter !== owner) return [owner, []];
+    if (q) repos = repos.filter(r => (r.name + " " + (r.desc || "")).toLowerCase().includes(q));
+
+    // finished repos first, newest by creation date; then the works-in-progress,
+    // most-complete closest to the finished list, totally empty at the very bottom
+    const done = repos.filter(isComplete);
+    const wip = repos.filter(r => !isComplete(r));
+    done.sort((a, b) => new Date(b.created) - new Date(a.created));
+    wip.sort((a, b) => {
+      const d = missingList(a).length - missingList(b).length;
+      return d !== 0 ? d : new Date(b.created) - new Date(a.created);
+    });
+    return [owner, done, wip];
+  });
+
+  let shown = 0;
+  for (const [owner, done, wip] of sections) {
+    const repos = done.concat(wip);
+    if ((filter === "pages" || filter === "all" || filter === "nopages" || filter === "nohome" || filter === "noreadme") && !q && repos.length === 0) continue;
+    if (filter !== "all" && filter !== "pages" && filter !== "nopages" && filter !== "nohome" && filter !== "noreadme" && filter !== owner) continue;
+
+    const h2 = document.createElement("h2");
+    h2.innerHTML = `${owner} <span class="count">${done.length} DONE · ${wip.length} NEEDS WORK</span><span class="rule"></span>`;
+    frag.appendChild(h2);
+
+    if (repos.length === 0) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "nothing matches the current filter";
+      frag.appendChild(e);
+    } else {
+      for (const r of done) { frag.appendChild(card(r)); shown++; }
+      if (wip.length) {
+        const wh = document.createElement("h2");
+        wh.className = "wip";
+        wh.innerHTML = `NEEDS WORK <span class="count">${wip.length}</span><span class="rule"></span>`;
+        frag.appendChild(wh);
+        for (const r of wip) { frag.appendChild(card(r)); shown++; }
+      }
+    }
+  }
+
+  if (shown === 0 && !frag.childNodes.length) {
+    rootEl.innerHTML = `<div class="empty">nothing matches “${esc(query)}”</div>`;
+  } else {
+    rootEl.innerHTML = "";
+    rootEl.appendChild(frag);
+  }
+}
+
+$("#search").addEventListener("input", e => { query = e.target.value; render(); });
+document.querySelectorAll(".fbtn").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".fbtn").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    filter = b.dataset.f;
+    render();
+  });
+});
+
+/* ---------- keyboard navigation ---------- */
+let sel = 0; // index into currently rendered cards
+
+const cards = () => [...rootEl.querySelectorAll(".card")];
+
+function markSelection() {
+  const cs = cards();
+  if (!cs.length) return;
+  sel = Math.max(0, Math.min(sel, cs.length - 1));
+  cs.forEach((c, i) => c.classList.toggle("sel", i === sel));
+}
+
+function move(delta) {
+  const cs = cards();
+  if (!cs.length) return;
+  sel = Math.max(0, Math.min(sel + delta, cs.length - 1));
+  markSelection();
+  cs[sel].scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function actOn(action) {
+  const c = cards()[sel];
+  if (!c) return;
+  if (action === "r") {
+    window.open(c.querySelector(".name").href, "_blank");
+  } else if (action === "o") {
+    const a = c.querySelector(".abtn.site");
+    if (a) a.click(); else c.querySelector(".name").click();
+  } else if (action === "p") {
+    const t = c.querySelector(".prev-toggle");
+    if (t) t.click();
+  } else if (action === "m") {
+    const t = c.querySelector(".readme-toggle");
+    if (t) t.click();
+  }
+}
+
+// clicking any card makes it the keyboard-selected one
+rootEl.addEventListener("mousedown", e => {
+  const c = e.target.closest(".card");
+  if (!c) return;
+  const idx = cards().indexOf(c);
+  if (idx >= 0 && idx !== sel) { sel = idx; markSelection(); }
+});
+
+document.addEventListener("keydown", e => {
+  // don't hijack typing in the search box (except Escape / Enter)
+  if (e.target === $("#search")) {
+    if (e.key === "Escape" || e.key === "Enter") { e.target.blur(); }
+    return;
+  }
+
+  switch (e.key.toLowerCase()) {
+    case "j": case "arrowdown": e.preventDefault(); move(1); break;
+    case "k": case "arrowup": e.preventDefault(); move(-1); break;
+    case "o": e.preventDefault(); actOn("o"); break;
+    case "p": e.preventDefault(); actOn("p"); break;
+    case "m": e.preventDefault(); actOn("m"); break;
+    case "r": e.preventDefault(); actOn("r"); break;
+    case "/": e.preventDefault(); $("#search").focus(); break;
+  }
+});
+
+const _render = render;
+render = function(keepSel) {
+  const selEl = keepSel ? document.querySelector(".card.sel") : null;
+  _render();
+  if (!keepSel) sel = 0;
+  if (keepSel && selEl) {
+    const idx = cards().indexOf(selEl.isConnected ? selEl : document.querySelector(`.card[data-owner="${CSS.escape(selEl.dataset.owner)}"][data-name="${CSS.escape(selEl.dataset.name)}"]`));
+    if (idx >= 0) sel = idx;
+  }
+  markSelection();
+};
+
+updateCounts(); // buttons show "…" until data lands
+load();
+</script>
 </body>
 </html>
