@@ -63,7 +63,7 @@ The whole thing is one static page — `index.html` (markup + logic), `style.css
 GET https://api.github.com/users/<owner>/repos?per_page=100
 ```
 
-for each owner using the workflow's built-in `GITHUB_TOKEN`, writes `data.json`, and commits it when anything changed. Commits pushed with `GITHUB_TOKEN` don't trigger the branch-based Pages build (GitHub suppresses that to prevent workflow loops), so the workflow then requests the rebuild explicitly — and the site updates itself. New repos appear within ~6 hours, or instantly with the Run button. When nothing changed the workflow commits nothing, except for one `fetchedAt` stamp-bump per day that keeps the repo "active" (GitHub auto-disables cron workflows after 60 days with no commits).
+for each owner using the workflow's built-in `GITHUB_TOKEN`, writes `data.json`, and commits it when anything changed. Commits pushed with `GITHUB_TOKEN` don't trigger the branch-based Pages build (GitHub suppresses that to prevent workflow loops), so the workflow then requests the rebuild explicitly — and the site updates itself. New repos appear within ~6 hours, or instantly with the Run button. When nothing changed the workflow commits nothing, except for one `fetchedAt` stamp-bump per day that keeps the repo "active" (GitHub auto-disables cron workflows after 60 days with no commits). The index repo's own `pushed_at` is excluded from change detection — otherwise every refresh commit would look like a new change and the workflow would never go quiet.
 
 **Rate-limit strategy (learned the hard way):**
 

@@ -98,7 +98,13 @@ repos.sort((a, b) =>
 let skip = false;
 try {
   const prev = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  const sameData = JSON.stringify(prev.repos) === JSON.stringify(repos);
+  // The workflow's own commits change this repo's pushed_at, so comparing it
+  // naively would never converge — every run would see a "change" and commit
+  // again (4+ commits/day forever). Ignore the self-repo's pushed_at when
+  // deciding whether anything changed; every other field still counts.
+  const SELF = (process.env.GITHUB_REPOSITORY || "razodin137/razodin137.github.io").split("/");
+  const canon = r => (r.owner === SELF[0] && r.name === SELF[1]) ? { ...r, pushed_at: "-" } : r;
+  const sameData = JSON.stringify(prev.repos.map(canon)) === JSON.stringify(repos.map(canon));
   const stampAge = Date.now() - new Date(prev.fetchedAt).getTime();
   if (sameData && stampAge < KEEPALIVE_MS) skip = true; // nothing new, stamp fresh
 } catch { /* no previous file (or unreadable) — write */ }
