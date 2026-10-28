@@ -1,0 +1,73 @@
+# Refreshes data.json — the static repo list index.html renders from — so page
+# loads never touch api.github.com. No 60/hr-per-IP unauthenticated limit for
+# visitors, no token in the browser, and nothing for bots to burn.
+#
+# Runs every 6 hours, on pushes that change its own files, and anytime via the
+# "Run workflow" button (Actions tab → Refresh data.json).
+#
+# Commits land as github-actions[bot]. Note: commits pushed with GITHUB_TOKEN
+# do NOT trigger the branch-based Pages build (by design), so the rebuild is
+# requested explicitly at the end via POST /repos/{owner}/{repo}/pages/builds.
+name: Refresh data.json
+
+on:
+  schedule:
+    - cron: "13 */6 * * *" # every 6 hours, off the top of the hour
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-data.yml"
+      - "scripts/fetch-data.mjs"
+
+permissions:
+  contents: write # commit the refreshed data.json
+  pages: write    # request the Pages rebuild after committing
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch repo data
+        env:
+          # Built-in per-run token: authenticates the API calls (15,000 req/hr
+          # vs 60/hr unauthenticated) and is never exposed to the site. If you
+          # ever want to include private repos too, create a fine-grained
+          # read-only PAT, add it as the GH_PAT repo secret, and it takes over.
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: node scripts/fetch-data.mjs
+
+      - name: Commit and push if changed
+        id: push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "data.json unchanged — nothing to commit"
+          else
+            git commit -m "refresh data.json (auto: scheduled repo sync)"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Request Pages rebuild
+        if: steps.push.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GITHUB_TOKEN pushes don't trigger the branch-based Pages build, so
+          # ask for it explicitly. 409 = a build is already queued; fine.
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds"; then
+            echo "pages build requested"
+          else
+            echo "pages build request failed — if this repeats, check Settings → Pages and the run log"
+          fi

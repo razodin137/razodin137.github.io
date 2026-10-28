@@ -2,7 +2,7 @@
 
 A single-file dashboard that lists every repo from [razodin137](https://github.com/razodin137) and the [mvvk-space](https://github.com/mvvk-space) org, each with one-click access to its published site, its GitHub repo, and an inline preview.
 
-**Live at:** <https://razodin137.github.io/2026-09-25-github-pages-homepage/>
+**Live at:** <https://razodin137.github.io/>
 
 ![repos-index screenshot](screenshot.png)
 
@@ -26,7 +26,7 @@ It's also a finishing checklist: a repo only earns its place in the main list on
 - **Read the README inline** — every repo with a README gets a `README ▾` button (or press `M` with the card selected). The raw markdown drops straight into the card with a line/KB count, so you can eyeball README quality without leaving the page. No markdown renderer, no dependencies — just the text.
 - **Counts on the filter buttons** — `PAGES (53)` shows the *combined* total across both accounts at a glance, no mental math.
 - **Filters** — ALL / RAZODIN137 / MVVK-SPACE / PAGES / NO PAGES / NO HOMEPAGE / NO README. Use the "NO …" segments to see exactly what still needs publishing.
-- **Live data, zero maintenance** — queries the GitHub REST API client-side on every page load (with a 10-minute local cache to dodge the rate limit). New repos and new pages sites appear automatically. No build step, no server, no cron, nothing to babysit.
+- **Live data, zero maintenance** — a scheduled GitHub Actions workflow re-fetches both repo lists into static `data.json` every 6 hours, so page loads never call the API at all. New repos and new pages sites appear on their own within hours — or instantly via the workflow's **Run workflow** button. No build step, no server, no API key, nothing to babysit.
 - **Degrades instead of bricking** — if one owner's fetch fails (rate limit, API hiccup), the other owner still renders and the meta line says exactly what couldn't be fetched. If the API is fully rate-limited but a recent list is cached, the page renders from cache with a note.
 - **Site links from the repo's own `homepage` field** — falls back to `https://<owner>.github.io/<repo>/` when a repo has Pages enabled but no homepage set.
 - **Search** — live filter across names and descriptions.
@@ -55,22 +55,24 @@ To add another consumer, filter `data.json` by your own topic and build whatever
 
 ## How it works
 
-The whole thing is one static page — `index.html` (markup + logic), `style.css` (styling, split out so other pages can reuse it), and `data.json` (the pre-fetched repo list). On load it fetches:
+The whole thing is one static page — `index.html` (markup + logic), `style.css` (styling, split out so other pages can reuse it), and `data.json` (the pre-fetched repo list). On load the page fetches `data.json` and renders the cards — a visit makes no API calls at all.
+
+`data.json` is kept current by [`.github/workflows/refresh-data.yml`](.github/workflows/refresh-data.yml), which runs [`scripts/fetch-data.mjs`](scripts/fetch-data.mjs) every 6 hours (and on demand via **Actions → Refresh data.json → Run workflow**). The script fetches
 
 ```
 GET https://api.github.com/users/<owner>/repos?per_page=100
 ```
 
-for each owner, then renders the cards. GitHub's API sends `access-control-allow-origin: *`, so direct browser calls work from any static host — no proxy needed.
+for each owner using the workflow's built-in `GITHUB_TOKEN`, writes `data.json`, and commits it when anything changed. Commits pushed with `GITHUB_TOKEN` don't trigger the branch-based Pages build (GitHub suppresses that to prevent workflow loops), so the workflow then requests the rebuild explicitly — and the site updates itself. New repos appear within ~6 hours, or instantly with the Run button. When nothing changed the workflow commits nothing, except for one `fetchedAt` stamp-bump per day that keeps the repo "active" (GitHub auto-disables cron workflows after 60 days with no commits).
 
 **Rate-limit strategy (learned the hard way):**
 
-- **Repo lists** come from `api.github.com` — 60 requests/hour unauthenticated, 2 used per visit. Three defenses keep you safe:
+- **Repo lists never come from the visitor's browser.** The workflow pre-fetches them into static `data.json`; loading the page — or a bot hammering it — costs zero API quota. The original live client-side fetch survives as a fallback if `data.json` ever fails to load, and it keeps its old defenses:
   - **ETag conditional requests** — on repeat visits, `If-None-Match` returns `304 Not Modified`, which *doesn't count* against the limit.
   - **…but only for 10 minutes** (`ETAG_TTL`). GitHub's list ETags do **not** change when you flip `has_pages` on a repo (enabling Pages doesn't touch `updated_at`), so an unconditional etag match would happily serve a stale cached list forever — the dashboard once swore only 19 repos had pages when the real combined total was 53. Past the TTL, the page refetches and pays 1 request per owner. Worst case with heavy reload-testing: ~12 requests/hour — still comfortably under the limit.
   - **localStorage fallback** — the last successful list is cached (versioned + shape-checked so stale cache formats can't be misread); if the limit is ever hit, the page renders from cache with a "showing cached list" note, and per-owner failures don't brick the page.
 - **README checks and README contents never touch `api.github.com`** (one call per repo would exhaust the limit instantly). File listings come from [jsDelivr's data API](https://data.jsdelivr.com) — no rate limit, full CORS — and README content is fetched as raw markdown from `raw.githubusercontent.com` (also CDN-served, no API limit). Repos too big for jsDelivr to enumerate fall back to probing the raw endpoint directly. Results cached in localStorage for 7 days.
-- **No token, no secret needed anywhere.** A personal access token in client-side code would be readable by anyone visiting the page, and GitHub auto-revokes tokens it finds in public files — so instead, everything per-repo runs through endpoints that don't count against the 60/hr API limit.
+- **No token ever reaches the browser.** A personal access token in client-side code would be readable by anyone visiting the page, and GitHub auto-revokes tokens it finds in public files. The workflow's `GITHUB_TOKEN` is minted fresh each run, expires when the run ends, and never touches the site — repo secrets are visible only to Actions, never to the published Pages files. If private repos should ever be included, add a fine-grained read-only PAT as the `GH_PAT` repo secret and the workflow uses it automatically.
 
 ## Adding more owners
 
@@ -88,11 +90,10 @@ Some sites (GitHub itself, sites with `X-Frame-Options: DENY`, etc.) refuse to b
 
 ## Deployment
 
-Any static host works. This repo serves it via GitHub Pages from the `master` branch:
+Any static host works. This repo is the `razodin137.github.io` user site, served by GitHub Pages from the `main` branch — a normal push to `main` redeploys automatically. The one exception is commits pushed by the workflow's `GITHUB_TOKEN` (GitHub suppresses the build they would trigger), so the workflow requests its own Pages build afterwards:
 
 ```
-gh api -X POST repos/<you>/<repo>/pages -f "source[branch]=master" -f "source[path]=/"
-gh api -X PATCH repos/<you>/<repo> -f homepage="https://<you>.github.io/<repo>/"
+gh api -X POST repos/<you>/<repo>/pages/builds
 ```
 
 ## License
