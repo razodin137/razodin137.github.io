@@ -26,7 +26,7 @@ It's also a finishing checklist: a repo only earns its place in the main list on
 - **Read the README inline** — every repo with a README gets a `README ▾` button (or press `M` with the card selected). The raw markdown drops straight into the card with a line/KB count, so you can eyeball README quality without leaving the page. No markdown renderer, no dependencies — just the text.
 - **Counts on the filter buttons** — `PAGES (53)` shows the *combined* total across both accounts at a glance, no mental math.
 - **Filters** — ALL / RAZODIN137 / MVVK-SPACE / PAGES / NO PAGES / NO HOMEPAGE / NO README. Use the "NO …" segments to see exactly what still needs publishing.
-- **Live data, zero maintenance** — a scheduled GitHub Actions workflow re-fetches both repo lists into static `data.json` every 6 hours, so page loads never call the API at all. New repos and new pages sites appear on their own within hours — or instantly via the workflow's **Run workflow** button. No build step, no server, no API key, nothing to babysit.
+- **Live data, zero maintenance** — a scheduled GitHub Actions workflow re-fetches both repo lists into static `data.json` every 7 hours, so page loads never call the API at all. New repos and new pages sites appear on their own within hours — or instantly via the workflow's **Run workflow** button. No build step, no server, no API key, nothing to babysit.
 - **Degrades instead of bricking** — if one owner's fetch fails (rate limit, API hiccup), the other owner still renders and the meta line says exactly what couldn't be fetched. If the API is fully rate-limited but a recent list is cached, the page renders from cache with a note.
 - **Site links from the repo's own `homepage` field** — falls back to `https://<owner>.github.io/<repo>/` when a repo has Pages enabled but no homepage set.
 - **Search** — live filter across names and descriptions.
@@ -57,13 +57,13 @@ To add another consumer, filter `data.json` by your own topic and build whatever
 
 The whole thing is one static page — `index.html` (markup + logic), `style.css` (styling, split out so other pages can reuse it), and `data.json` (the pre-fetched repo list). On load the page fetches `data.json` and renders the cards — a visit makes no API calls at all.
 
-`data.json` is kept current by [`.github/workflows/refresh-data.yml`](.github/workflows/refresh-data.yml), which runs [`scripts/fetch-data.mjs`](scripts/fetch-data.mjs) every 6 hours (and on demand via **Actions → Refresh data.json → Run workflow**). The script fetches
+`data.json` is kept current by [`.github/workflows/refresh-data.yml`](.github/workflows/refresh-data.yml), which runs [`scripts/fetch-data.mjs`](scripts/fetch-data.mjs) every 7 hours (and on demand via **Actions → Refresh data.json → Run workflow**). The script fetches
 
 ```
 GET https://api.github.com/users/<owner>/repos?per_page=100
 ```
 
-for each owner using the workflow's built-in `GITHUB_TOKEN`, writes `data.json`, and commits it when anything changed. Commits pushed with `GITHUB_TOKEN` don't trigger the branch-based Pages build (GitHub suppresses that to prevent workflow loops), so the workflow then requests the rebuild explicitly — and the site updates itself. New repos appear within ~6 hours, or instantly with the Run button. When nothing changed the workflow commits nothing, except for one `fetchedAt` stamp-bump per day that keeps the repo "active" (GitHub auto-disables cron workflows after 60 days with no commits). The index repo's own `pushed_at` is excluded from change detection — otherwise every refresh commit would look like a new change and the workflow would never go quiet.
+for each owner using the workflow's built-in `GITHUB_TOKEN`, writes `data.json`, and commits it when anything changed. Commits pushed with `GITHUB_TOKEN` don't trigger the branch-based Pages build (GitHub suppresses that to prevent workflow loops), so the workflow then requests the rebuild explicitly — and the site updates itself. New repos appear within ~7 hours, or instantly with the Run button. When nothing changed the workflow commits nothing, except for one `fetchedAt` stamp-bump per day that keeps the repo "active" (GitHub auto-disables cron workflows after 60 days with no commits). The index repo's own `pushed_at` is excluded from change detection — otherwise every refresh commit would look like a new change and the workflow would never go quiet.
 
 **Rate-limit strategy (learned the hard way):**
 

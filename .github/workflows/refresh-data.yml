@@ -2,7 +2,7 @@
 # loads never touch api.github.com. No 60/hr-per-IP unauthenticated limit for
 # visitors, no token in the browser, and nothing for bots to burn.
 #
-# Runs every 6 hours, on pushes that change its own files, and anytime via the
+# Runs every 7 hours, on pushes that change its own files, and anytime via the
 # "Run workflow" button (Actions tab → Refresh data.json).
 #
 # Commits land as github-actions[bot]. Note: commits pushed with GITHUB_TOKEN
@@ -12,7 +12,7 @@ name: Refresh data.json
 
 on:
   schedule:
-    - cron: "13 */6 * * *" # every 6 hours, off the top of the hour
+    - cron: "13 */7 * * *" # every 7 hours (00:13, 07:13, 14:13, 21:13 UTC)
   workflow_dispatch:
   push:
     branches: [main]
