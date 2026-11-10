@@ -1,6 +1,32 @@
 {
-  "fetchedAt": "2026-11-10T03:28:25.650Z",
+  "fetchedAt": "2026-11-10T15:32:23.678Z",
   "repos": [
+    {
+      "owner": "razodin137",
+      "name": "2026-11-10-dreaming-memory",
+      "description": "It's an attempt at implementing Anthropic's \"DREAMING\" technique in order to synthesize better memories from a nightly run of reviewing agent's created memories",
+      "homepage": "https://razodin137.github.io/2026-11-10-dreaming-memory/",
+      "has_pages": true,
+      "html_url": "https://github.com/razodin137/2026-11-10-dreaming-memory",
+      "language": "JavaScript",
+      "topics": [],
+      "pushed_at": "2026-11-10T08:18:37Z",
+      "created_at": "2026-11-10T08:14:53Z",
+      "fork": false
+    },
+    {
+      "owner": "razodin137",
+      "name": "prompt-autopilot",
+      "description": "It's a template for creating and upgrading software on autopilot. I've got it running with opencode. Feel free to fork it to run according to your needs.",
+      "homepage": null,
+      "has_pages": false,
+      "html_url": "https://github.com/razodin137/prompt-autopilot",
+      "language": "Shell",
+      "topics": [],
+      "pushed_at": "2026-11-10T07:19:31Z",
+      "created_at": "2026-11-06T11:25:47Z",
+      "fork": false
+    },
     {
       "owner": "razodin137",
       "name": "razodin137.github.io",
@@ -10,7 +36,7 @@
       "html_url": "https://github.com/razodin137/razodin137.github.io",
       "language": "HTML",
       "topics": [],
-      "pushed_at": "2026-11-09T17:24:24Z",
+      "pushed_at": "2026-11-10T03:28:26Z",
       "created_at": "2026-09-25T06:57:53Z",
       "fork": false
     },
@@ -91,19 +117,6 @@
       "pushed_at": "2026-11-06T16:01:47Z",
       "created_at": "2026-11-06T10:50:59Z",
       "fork": true
-    },
-    {
-      "owner": "razodin137",
-      "name": "prompt-autopilot",
-      "description": "It's a template for creating and upgrading software on autopilot. I've got it running with opencode. Feel free to fork it to run according to your needs.",
-      "homepage": null,
-      "has_pages": false,
-      "html_url": "https://github.com/razodin137/prompt-autopilot",
-      "language": "Shell",
-      "topics": [],
-      "pushed_at": "2026-11-06T11:27:27Z",
-      "created_at": "2026-11-06T11:25:47Z",
-      "fork": false
     },
     {
       "owner": "razodin137",
